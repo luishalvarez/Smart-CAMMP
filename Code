@@ -37,7 +37,7 @@ from sklearn import datasets, model_selection, svm
 alldata = np.load("AData.npy")
 
 
-########################## TRAIN DATA #########################################
+########################## TRAINING DATA #########################################
 
 n_subjects = 50
 n_features = 15
@@ -66,7 +66,7 @@ X_train_gyr = sel_feat_gyr.fit_transform(X_train_gyr, Y_train)
 X_train = np.hstack((X_train_acc, X_train_gyr))
 
 
-##################### TEST DATA ###############################################
+##################### TESTING DATA ###############################################
         
 samples_per_subject_test = 65280
 X_test = np.zeros([samples_per_subject_test*n_subjects,90])
@@ -128,7 +128,7 @@ for index, row in enumerate(X_test):
         X_test_enc[index, index2] = e.encrypt(a)
         
 
-###################### DECIMAL POINT #########################################
+###################### REMOVE DECIMAL POINT #########################################
 
 X_train_enc2 = X_train_enc/10000
 X_train_enc2[:,8] = X_train_enc[:,8]/10
