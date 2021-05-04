@@ -1,1 +1,316 @@
+"""
 
+@author: Luis Hernández-Álvarez, José María de Fuentes,
+Lorena González-Manzano, Luis Hernández Encinas.
+
+Code of the article titled: SmartCAMPP - Smartphone-based Continuous Authentication 
+leveraging Motion sensors with Privacy Preservation
+
+Data retrieved from Sherlock Database (Data.npy file)
+
+"""
+
+import pandas as pd
+import numpy as np
+
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV
+from sklearn.feature_selection import SelectKBest
+from sklearn.feature_selection import chi2
+from copy import deepcopy
+import matplotlib.pyplot as plt
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+import seaborn as sns
+import random
+import pyffx
+import re
+import time
+
+from sklearn.svm import OneClassSVM
+from sklearn import metrics
+from sklearn import datasets, model_selection, svm
+
+############################ LOAD DATA ########################################
+alldata = np.load("AData.npy")
+
+
+########################## TRAIN DATA #########################################
+
+n_subjects = 50
+n_features = 15
+samples_per_subject_train = 11520
+#samples_per_subject_train = 50000
+X_train = np.zeros([samples_per_subject_train*n_subjects,90])
+Y_train = np.zeros(samples_per_subject_train*n_subjects)
+counter = 0
+for index in np.arange(n_subjects):
+    for i in np.arange(samples_per_subject_train):
+        Y_train[counter] = index
+        X_train[counter,:] = alldata[index,i][:-1]
+        counter = counter + 1
+        
+X_train = np.abs(X_train)    
+
+X_train_acc = deepcopy(X_train[:,:48])
+sel_feat_acc = SelectKBest(chi2, k=8)
+X_train_acc = sel_feat_acc.fit_transform(X_train_acc, Y_train)
+
+
+X_train_gyr = deepcopy(X_train[:,48:])
+sel_feat_gyr = SelectKBest(chi2, k=7)
+X_train_gyr = sel_feat_gyr.fit_transform(X_train_gyr, Y_train)
+
+X_train = np.hstack((X_train_acc, X_train_gyr))
+
+
+##################### TEST DATA ###############################################
+        
+samples_per_subject_test = 65280
+X_test = np.zeros([samples_per_subject_test*n_subjects,90])
+Y_test = np.zeros(samples_per_subject_test*n_subjects)
+counter = 0
+for index in np.arange(n_subjects):
+    for i in np.arange(samples_per_subject_test):
+        Y_test[counter] = index
+        X_test[counter,:] = alldata[index,i+samples_per_subject_train][:-1]
+        counter = counter + 1
+        
+X_test = np.abs(X_test)    
+
+X_test_acc = deepcopy(X_test[:,:48])
+X_test_acc = sel_feat_acc.transform(X_test_acc)
+
+
+X_test_gyr = deepcopy(X_test[:,48:])
+X_test_gyr = sel_feat_gyr.transform(X_test_gyr)
+
+X_test = np.hstack((X_test_acc, X_test_gyr))
+
+####################### ENCRYPT ###############################################
+
+password_list = []
+
+char = "0123456789abcdefghijklmnopqrstuvwxyz"
+password = ''
+for i in np.arange(20):
+    password = password + random.choice(char)
+
+counter = 0
+X_train_enc = deepcopy(X_train)
+for index, row in enumerate(X_train):
+    if(index == counter*samples_per_subject_train):
+        counter = counter + 1
+        char = "0123456789abcdefghijklmnopqrstuvwxyz"
+        password = ''
+        for i in np.arange(20):
+            password = password + random.choice(char) 
+        password_list.append(password)      
+    for index2, element in enumerate(row):
+        a = re.sub(r'\W+', '', str(element))
+        a = a.replace('e','')
+        e = pyffx.String(bytes(password,'utf-8'), alphabet='1234567890', length=len(a))
+        X_train_enc[index, index2] = e.encrypt(a)
+
+counter = 1
+X_test_enc = deepcopy(X_test)
+password = password_list[0]
+for index, row in enumerate(X_test):
+    if(index == (counter)*samples_per_subject_test):
+        password = password_list[counter]
+        counter = counter + 1
+    for index2, element in enumerate(row):
+        a = re.sub(r'\W+', '', str(element))
+        a = a.replace('e','')
+        e = pyffx.String(bytes(password,'utf-8'), alphabet='1234567890', length=len(a))
+        X_test_enc[index, index2] = e.encrypt(a)
+        
+
+###################### DECIMAL POINT #########################################
+
+X_train_enc2 = X_train_enc/10000
+X_train_enc2[:,8] = X_train_enc[:,8]/10
+X_train_enc2[:,13] = X_train_enc[:,13]/10
+
+X_test_enc2 = X_test_enc/10000
+X_test_enc2[:,8] = X_test_enc[:,8]/10
+X_test_enc2[:,13] = X_test_enc[:,13]/10    
+        
+
+###################### NORMALIZE ##############################################
+
+scaler = StandardScaler()     
+X_train_enc2 = scaler.fit_transform(X_train_enc2)
+X_test_enc2 = scaler.transform(X_test_enc2)
+
+
+############################# ML MODEL ########################################
+
+
+
+print('Initiate training')
+
+best_linear_C = []
+best_linear_gamma = []
+best_linear_solver = []
+best_linear_depth = []
+best_linear_estimators = []
+
+accuracies = []
+model_times = []
+EERs = []
+THs = []
+fpr_vector = []
+tpr_vector = []
+
+for iteration,subject in enumerate(np.arange(n_subjects)):
+
+        start = time.time()
+        my_X_train = np.zeros([samples_per_subject_train*2,n_features])
+        my_Y_train = np.zeros(samples_per_subject_train*2)
+        other_X_train = np.zeros([samples_per_subject_train*(n_subjects-1),n_features])
+        
+        init = samples_per_subject_train*subject
+        my_X_train[:samples_per_subject_train,:] = X_train_enc2[init:init+samples_per_subject_train,:]
+        my_Y_train[:samples_per_subject_train] = 1
+        
+        counter = 0
+        for index,row in enumerate(X_train_enc2):
+            if index not in (np.arange(samples_per_subject_train)+init):
+                other_X_train[counter,:] = row
+                counter = counter + 1
+        
+        idx = np.random.randint(samples_per_subject_train*(n_subjects-1), size=samples_per_subject_train)
+        my_X_train[samples_per_subject_train:,:] = other_X_train[idx,:]
+
+
+
+        my_X_test = np.zeros([samples_per_subject_test*2,n_features])
+        my_Y_test = np.zeros(samples_per_subject_test*2)
+        other_X_test = np.zeros([samples_per_subject_test*(n_subjects-1),n_features])
+        
+        init = samples_per_subject_test*subject
+        my_X_test[:samples_per_subject_test,:] = X_test_enc2[init:init+samples_per_subject_test,:]
+        my_Y_test[:samples_per_subject_test] = 1
+        
+        counter = 0
+        for index,row in enumerate(X_test_enc2):
+            if index not in (np.arange(samples_per_subject_test)+init):
+                other_X_test[counter,:] = row
+                counter = counter + 1
+        
+        idx = np.random.randint(samples_per_subject_test*(n_subjects-1), size=samples_per_subject_test)
+        my_X_test[samples_per_subject_test:,:] = other_X_test[idx,:]
+    
+        
+        ## SVM
+        parameters = {
+            #"kernel": ['rbf','linear'],
+            "C": [0.1, 1, 10, 100, 1000],
+            "gamma": ['auto', 'scale', 0.001, 0.01, 0.1]            
+        }
+
+        clf_cv = GridSearchCV(SVC(kernel='rbf'), param_grid=parameters,scoring='neg_mean_squared_error', n_jobs=-1, cv=5, iid=False)
+        clf_cv.fit(my_X_train,my_Y_train)
+        best_linear_C.append(clf_cv.best_params_['C'])
+        best_linear_gamma.append(clf_cv.best_params_['gamma']) 
+        clf = SVC(kernel='rbf',C=clf_cv.best_params_['C'],gamma=clf_cv.best_params_['gamma']).fit(my_X_train, my_Y_train)
+        
+        
+        '''
+        ## Logistic Regression
+        parameters = {
+            "C": [0.1, 1, 10, 100, 1000],
+            "solver": ['auto', 'scale', 0.001, 0.01, 0.1]            
+        }
+
+        clf_cv = GridSearchCV(LogisticRegression(), param_grid=parameters,scoring='neg_mean_squared_error', n_jobs=-1, cv=5, iid=False)
+        clf_cv.fit(my_X_train,my_Y_train)
+        best_linear_C.append(clf_cv.best_params_['C'])
+        best_linear_solver.append(clf_cv.best_params_['gamma']) 
+        clf = LogisticRegression(C=clf_cv.best_params_['C'],solver=clf_cv.best_params_['solver']).fit(my_X_train, my_Y_train)
+        
+        '''
+        '''
+        ## Random Forest
+        parameters = {
+            "max_depth": [0.1, 1, 10, 100, 1000],
+            "n_estimators": ['auto', 'scale', 0.001, 0.01, 0.1]            
+        }
+
+        clf_cv = GridSearchCV(RandomForestClassifier(), param_grid=parameters,scoring='neg_mean_squared_error', n_jobs=-1, cv=5, iid=False)
+        clf_cv.fit(my_X_train,my_Y_train)
+        best_linear_depth.append(clf_cv.best_params_['max_depth'])
+        best_linear_estimators.append(clf_cv.best_params_['n_estimators']) 
+        clf = RandomForestClassifier(max_depth=clf_cv.best_params_['max_depth'],n_estimators=clf_cv.best_params_['n_estimators']).fit(my_X_train, my_Y_train)
+        '''
+       
+        ## ROC Curve
+        prob = clf.predict_proba(my_X_test)
+        acc = clf.score(my_X_test,my_Y_test)                 
+        accuracies.append(acc)
+        print("The test accuracy in 1 vs. all configuration is %2.2f%%" %(100*acc))
+        
+        pos_prob = prob[:,1]
+        fpr, tpr, thresholds = metrics.roc_curve(my_Y_test, pos_prob, pos_label=1)
+        fpr_vector.append(fpr)
+        tpr_vector.append(tpr)
+        
+        plt.subplots(1, figsize=(10,10))
+        plt.title("ROC curve of user %d" %(subject))
+        plt.plot(fpr, tpr)
+        plt.plot([1, 0], ls="--")
+        plt.plot([0, 0], [1, 0] , c=".7"), plt.plot([1, 1] , c=".7")
+        plt.ylabel('True Positive Rate')
+        plt.xlabel('False Positive Rate')
+        plt.show()
+        
+        EER = fpr[np.argmin(np.abs(fpr-(1-tpr)))]
+        print("The EER is: %2.2f%%" %(EER))
+        EERs.append(EER)
+        #FAR = fpr[np.argmin(np.abs(fpr-(1-tpr)))]
+        #FRR = 1-tpr[np.argmin(np.abs(fpr-(1-tpr)))]
+        TH = thresholds[np.argmin(np.abs(fpr-(1-tpr)))]
+        print("The TH is: %2.2f%%" %(TH))
+        THs.append(TH)
+        
+plt.subplots(1, figsize=(10,10))
+plt.title("ROC curves for the 50 users - SVM")
+for number in np.arange(50):
+    plt.plot(fpr_vector[number], tpr_vector[number])
+plt.plot([1, 0], ls="--")
+plt.plot([0, 0], [1, 0] , c=".7"), plt.plot([1, 1] , c=".7")
+plt.ylabel('True Positive Rate')
+plt.xlabel('False Positive Rate')
+plt.show()
+
+
+
+
+
+
+############################# BOX PLOT ########################################
+
+customer_data_file = 'Bloxplots.xlsx'
+
+customers = pd.read_excel(customer_data_file,
+sheetname=0,
+header=0,
+index_col=False,
+keep_default_na=False
+)
+
+customers.head()
+f,axes = plt.subplots(1,1, figsize=(10,5))
+fig = sns.boxplot(x="Case", y="Accuracy", hue="SVMType",
+                 data=customers)
+fig.axes.set_title("Continuous Authentication Results",
+                    fontsize=16)
+fig.set_xlabel("Case", 
+                fontsize=14)
+fig.set_ylabel("Accuracy (%)",
+                fontsize=14)
+fig.set_ylim(35,100)
+fig.legend(loc='lower center', fontsize=10)
