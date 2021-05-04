@@ -1,4 +1,4 @@
-# Smart-CAMMP
+# Smart-CAMPP
 
 Code of the article titled: SmartCAMPP - Smartphone-based Continuous Authentication leveraging Motion sensors with Privacy Preservation
 
