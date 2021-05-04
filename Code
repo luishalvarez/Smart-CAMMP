@@ -285,32 +285,3 @@ plt.plot([0, 0], [1, 0] , c=".7"), plt.plot([1, 1] , c=".7")
 plt.ylabel('True Positive Rate')
 plt.xlabel('False Positive Rate')
 plt.show()
-
-
-
-
-
-
-############################# BOX PLOT ########################################
-
-customer_data_file = 'Bloxplots.xlsx'
-
-customers = pd.read_excel(customer_data_file,
-sheetname=0,
-header=0,
-index_col=False,
-keep_default_na=False
-)
-
-customers.head()
-f,axes = plt.subplots(1,1, figsize=(10,5))
-fig = sns.boxplot(x="Case", y="Accuracy", hue="SVMType",
-                 data=customers)
-fig.axes.set_title("Continuous Authentication Results",
-                    fontsize=16)
-fig.set_xlabel("Case", 
-                fontsize=14)
-fig.set_ylabel("Accuracy (%)",
-                fontsize=14)
-fig.set_ylim(35,100)
-fig.legend(loc='lower center', fontsize=10)
